@@ -42,16 +42,33 @@ jobs:
           bash <(wget -qO- https://main.ssss.nyc.mn/setup_proxy.sh)
 
       - name: 🚀 运行续期脚本
+        id: run_script
+        continue-on-error: true
         env:
           EMAIL: ${{ secrets.EMAIL }}
           PASSWORD: ${{ secrets.PASSWORD }}
           COOKIE_VALUE: ${{ secrets.COOKIE_VALUE }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" python -u app.py
+          SHOT_DIR: screenshots
+        run: |
+          mkdir -p screenshots
+          xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" python -u app.py
+          echo "exit_code=$?" >> $GITHUB_OUTPUT
 
-      # 更新时间到time.txt,避免6个月未更新导致工作流暂停
+      # ⭐ 无论成功失败都上传截图，便于排查问题
+      - name: 📸 上传截图 artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hiden-screenshots-${{ github.run_id }}
+          path: screenshots/
+          if-no-files-found: warn
+          retention-days: 14
+
+      # 更新时间到 time.txt，避免 6 个月未更新导致工作流暂停
       - name: 🕒 更新时间
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -63,16 +80,22 @@ jobs:
             git commit -m "⏱️ Auto Update by Github Actions $(TZ=Asia/Shanghai date +'%Y-%m-%d %H:%M:%S')"
             git push origin main
           fi
-      
+
+      # 保留最近 4 条运行记录（跳过当前正在运行的这条）
       - name: 🧹 清理旧的工作流运行记录
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           runs=$(gh run list --workflow="${{ github.workflow }}" --limit=100 --json databaseId --jq '.[].databaseId')
+          current_run="${{ github.run_id }}"
           count=0
           for run_id in $runs; do
-            count=$((count + 4))
+            if [ "$run_id" = "$current_run" ]; then
+              echo "跳过当前运行: $run_id"
+              continue
+            fi
+            count=$((count + 1))
             if [ $count -gt 4 ]; then
               echo "删除运行记录: $run_id"
               gh run delete $run_id || true
