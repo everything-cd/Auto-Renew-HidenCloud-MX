@@ -239,6 +239,23 @@ def _click_security_submit(page):
             continue
     return False
 
+def _log_security_page_info(page):
+    """Cloudflare 卡住时把验证页结构打到日志，便于排查（不截图，避免文件名覆盖）。"""
+    try:
+        srcs = page.evaluate(
+            "() => Array.from(document.querySelectorAll('iframe')).map(f => f.src).filter(Boolean)"
+        )
+        buttons = page.evaluate(
+            "() => Array.from(document.querySelectorAll('button, input[type=submit], a.btn'))"
+            ".map(b => (b.innerText || b.value || '').trim()).filter(t => t && t.length < 40)"
+        )
+        body = page.evaluate("() => document.body ? document.body.innerText.slice(0, 200) : ''")
+        log(f"🔍 [CF] iframes: {srcs}")
+        log(f"🔍 [CF] buttons: {buttons}")
+        log(f"🔍 [CF] body: {body!r}")
+    except Exception as e:
+        log(f"🔍 [CF] 信息采集失败: {e}")
+
 def handle_cloudflare(page, timeout=240):
     """Cloudflare 处理：正常流程不截图，仅失败时截图。"""
     def challenge_active():
@@ -254,6 +271,7 @@ def handle_cloudflare(page, timeout=240):
 
     log("🔒 检测到 Cloudflare 安全验证...")
     time.sleep(5)
+    _log_security_page_info(page)   # 只在刚检测到时 dump 一次验证页结构
 
     effective_timeout = timeout + (180 if timeout > 60 else 0)
     manual_hinted = False
@@ -536,6 +554,7 @@ def renew_service(page):
         shot(page, "service_page_loaded")
 
         log("🖱️ 准备点击 Renew 按钮...")
+        time.sleep(3)
         renew_btn = page.locator('button:has-text("Renew")')
         create_btn = page.locator('button:has-text("Create Invoice")')
 
@@ -575,6 +594,7 @@ def renew_service(page):
             log("⚠️ Turnstile 未确认通过，仍将尝试提交...")
             shot(page, "FAIL_renew_turnstile")
 
+        time.sleep(3)
         new_invoice_url = None
         for attempt in range(6):
             log(f"🖱️ 点击 'Create Invoice'（第 {attempt + 1} 次）...")
